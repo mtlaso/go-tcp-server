@@ -123,7 +123,7 @@ func (app *app) handleConnection(conn net.Conn) {
 			slog.Any("client_id", clientID),
 			slog.String("message", trimmedMessage))
 
-		handleMessages(trimmedMessage, app, rw)
+		handleMessage(trimmedMessage, app, rw, clientID)
 
 		// Flush the buffer to ensure data is sent.
 		err = rw.Flush()
@@ -162,7 +162,7 @@ func main() {
 	}
 }
 
-func handleMessages(message string, app *app, rw *bufio.ReadWriter) {
+func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int64) {
 	switch {
 	case len(message) == 0:
 		return
@@ -188,10 +188,23 @@ func handleMessages(message string, app *app, rw *bufio.ReadWriter) {
 		}
 
 	default:
-		_, err := rw.WriteString("[server] hello from server!\n\n")
-		if err != nil {
-			app.logger.Error("error writing to client", slog.Any("error", err))
-			return
+		// Broadcast message to other clients.
+		otherClients := make(map[int64]net.Conn)
+
+		for k, v := range app.clients.clients {
+			if clientID != k {
+				otherClients[k] = v
+			}
+		}
+
+		for _, client := range otherClients {
+			// clientID here is the client_id of the client who sent the message!
+			msg := fmt.Sprintf("[%v][from #%v] %v\n\n", client.RemoteAddr().String(), clientID, message)
+			_, err := client.Write([]byte(msg))
+			if err != nil {
+				app.logger.Error("error writing to client", slog.Any("error", err))
+				return
+			}
 		}
 	}
 }
