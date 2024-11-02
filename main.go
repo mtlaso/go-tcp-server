@@ -13,6 +13,11 @@ import (
 	"sync/atomic"
 )
 
+const (
+	commandCountClients     = "/count"
+	commandCountClientsDesc = "number of connected clients to the server"
+)
+
 // clients represents the clients connected to the server.
 type clients struct {
 	clients map[int64]net.Conn
@@ -81,16 +86,20 @@ func (app *app) handleConnection(conn net.Conn) {
 	welcomeMsg := fmt.Sprintf(
 		"Welcome to the server!\n"+
 			"You are now connected as client #%d\n"+
-			"Number of clients connected: %d\n\n",
+			"Number of clients connected: %d\n\n"+
+			"Special commands:\n"+
+			"\t%v \t %v\n\n",
 		clientID,
-		app.clients.count())
+		app.clients.count(),
+		commandCountClients,
+		commandCountClientsDesc)
 	_, err := rw.WriteString(welcomeMsg)
 	if err != nil {
 		app.logger.Error("error writing to client", slog.Any("error", err))
 		return
 	}
 
-	// Flush to send message directly to the client.
+	// Flush to send welcome message directly to the client.
 	err = rw.Flush()
 	if err != nil {
 		app.logger.Error("error flushing data", slog.Any("error", err))
@@ -121,10 +130,20 @@ func (app *app) handleConnection(conn net.Conn) {
 			slog.Any("client_id", clientID),
 			slog.String("message", trimmedMessage))
 
-		_, err = rw.WriteString("hello from server!\r\n")
-		if err != nil {
-			app.logger.Error("error writing to client", slog.Any("error", err))
-			return
+		switch {
+		case trimmedMessage == commandCountClients:
+			count := fmt.Sprintf("[server] %d\n", app.clients.count())
+			_, err = rw.WriteString(count)
+			if err != nil {
+				app.logger.Error("error writing to client", slog.Any("error", err))
+				return
+			}
+		default:
+			_, err = rw.WriteString("[server] hello from server!\n")
+			if err != nil {
+				app.logger.Error("error writing to client", slog.Any("error", err))
+				return
+			}
 		}
 
 		// Flush the buffer to ensure data is sent.
