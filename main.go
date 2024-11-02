@@ -14,8 +14,11 @@ import (
 )
 
 const (
-	commandCountClients     = "/count"
-	commandCountClientsDesc = "number of connected clients to the server"
+	commandCountClients        = "/count"
+	commandCountClientsDesc    = "number of connected clients to the server"
+	commandSpecialCommands     = "/help"
+	commandSpecialCommandsDesc = "show special commands"
+	commandUnknowError         = "unknown command"
 )
 
 // clients represents the clients connected to the server.
@@ -83,17 +86,7 @@ func (app *app) handleConnection(conn net.Conn) {
 	rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
 
 	// Welcome message.
-	welcomeMsg := fmt.Sprintf(
-		"Welcome to the server!\n"+
-			"You are now connected as client #%d\n"+
-			"Number of clients connected: %d\n\n"+
-			"Special commands:\n"+
-			"\t%v \t %v\n\n",
-		clientID,
-		app.clients.count(),
-		commandCountClients,
-		commandCountClientsDesc)
-	_, err := rw.WriteString(welcomeMsg)
+	_, err := rw.WriteString(welcomeMsg(app, clientID))
 	if err != nil {
 		app.logger.Error("error writing to client", slog.Any("error", err))
 		return
@@ -130,21 +123,7 @@ func (app *app) handleConnection(conn net.Conn) {
 			slog.Any("client_id", clientID),
 			slog.String("message", trimmedMessage))
 
-		switch {
-		case trimmedMessage == commandCountClients:
-			count := fmt.Sprintf("[server] %d\n", app.clients.count())
-			_, err = rw.WriteString(count)
-			if err != nil {
-				app.logger.Error("error writing to client", slog.Any("error", err))
-				return
-			}
-		default:
-			_, err = rw.WriteString("[server] hello from server!\n")
-			if err != nil {
-				app.logger.Error("error writing to client", slog.Any("error", err))
-				return
-			}
-		}
+		handleMessages(trimmedMessage, app, rw)
 
 		// Flush the buffer to ensure data is sent.
 		err = rw.Flush()
@@ -181,4 +160,65 @@ func main() {
 
 		go app.handleConnection(conn)
 	}
+}
+
+func handleMessages(message string, app *app, rw *bufio.ReadWriter) {
+	switch {
+	case len(message) == 0:
+		return
+	case message == commandCountClients:
+		count := fmt.Sprintf("[server] %d\n\n", app.clients.count())
+		_, err := rw.WriteString(count)
+		if err != nil {
+			app.logger.Error("error writing to client", slog.Any("error", err))
+			return
+		}
+	case message == commandSpecialCommands:
+		_, err := rw.WriteString(showSpecialCommands())
+		if err != nil {
+			app.logger.Error("error writing to client", slog.Any("error", err))
+			return
+		}
+	case message[0] == '/':
+		msg := fmt.Sprintf("[server] %v '%v'\n\n", commandUnknowError, message)
+		_, err := rw.WriteString(msg)
+		if err != nil {
+			app.logger.Error("error writing to client", slog.Any("error", err))
+			return
+		}
+
+	default:
+		_, err := rw.WriteString("[server] hello from server!\n\n")
+		if err != nil {
+			app.logger.Error("error writing to client", slog.Any("error", err))
+			return
+		}
+	}
+}
+
+// welcomeMsg returns the welcome message.
+func welcomeMsg(app *app, clientID int64) string {
+	welcomeMsg := fmt.Sprintf(
+		"Welcome to the server!\n"+
+			"You are now connected as client #%d\n"+
+			"Number of clients connected: %d\n\n"+
+			showSpecialCommands(),
+		clientID,
+		app.clients.count())
+
+	return welcomeMsg
+}
+
+// showSpecialCommands returns the list of commands.
+func showSpecialCommands() string {
+	commandsMsg := fmt.Sprintf(
+		"Special commands:\n"+
+			"\t%v \t %v\n"+
+			"\t%v \t %v\n\n",
+		commandCountClients,
+		commandCountClientsDesc,
+		commandSpecialCommands,
+		commandSpecialCommandsDesc)
+
+	return commandsMsg
 }
