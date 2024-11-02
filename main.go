@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -17,6 +16,22 @@ type app struct {
 func (app *app) errout(msg string, keyvals ...any) {
 	app.logger.Error(msg, keyvals...)
 	panic(1)
+}
+
+func (app *app) handleConnection(conn net.Conn) {
+	app.logger.Info("got a connection:", slog.Any("conn", conn.LocalAddr().String()))
+
+	_, err := conn.Write([]byte("hello world!"))
+	if err != nil {
+		app.logger.Error("error writing to client", slog.Any("error", err))
+	}
+
+	defer func() {
+		closeErr := conn.Close()
+		if closeErr != nil {
+			app.logger.Error("error closing connection", slog.Any("error", closeErr))
+		}
+	}()
 }
 
 func main() {
@@ -40,10 +55,6 @@ func main() {
 			continue
 		}
 
-		go handleConnection(conn)
+		go app.handleConnection(conn)
 	}
-}
-
-func handleConnection(conn net.Conn) {
-	fmt.Println("got a connection:", conn.LocalAddr().String())
 }
