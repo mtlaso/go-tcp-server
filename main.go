@@ -96,6 +96,8 @@ func (app *app) broadcastMessage(message string, clientID int64) {
 //
 // clientID : client ID of the client who left.
 func (app *app) broadcastServerMessageClientLeft(clientID int64) {
+	app.clients.mu.RLock()
+	defer app.clients.mu.RUnlock()
 	for _, client := range app.clients.clients {
 		// clientID here is the client_id of the client who sent the message!
 		msg := fmt.Sprintf("[server] client #%v left the server.\n\n", clientID)

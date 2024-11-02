@@ -17,3 +17,4 @@ REQUIREMENTS
 - [ ] traductions des messages des clients en temps réel (avec commande spéciale)
 - [ ] ajouter un/des jeux ?? (guess small word?)
 - [ ] Faire un test pour savoir le nb max de connections que le serveur peut supporter
+- [ ] Ajouter encryption (tls?)
