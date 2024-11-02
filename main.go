@@ -68,6 +68,45 @@ func (app *app) errout(msg string, keyvals ...any) {
 	panic(1)
 }
 
+// broadcastMessage broadcasts a message to all other clients except the one who sent the message.
+//
+// clientID : client ID of the client who sent the message.
+func (app *app) broadcastMessage(message string, clientID int64) {
+	otherClients := make(map[int64]net.Conn)
+
+	for k, v := range app.clients.clients {
+		if clientID != k {
+			otherClients[k] = v
+		}
+	}
+
+	for _, client := range otherClients {
+		// clientID here is the client_id of the client who sent the message!
+		msg := fmt.Sprintf("[%v][from #%v] %v\n\n", client.RemoteAddr().String(), clientID, message)
+		_, err := client.Write([]byte(msg))
+		if err != nil {
+			app.logger.Error("error writing to client", slog.Any("error", err))
+			return
+		}
+	}
+}
+
+// broadcastServerMessageClientLeft broadcasts an official server message to all
+// other clients about a client that left.
+//
+// clientID : client ID of the client who left.
+func (app *app) broadcastServerMessageClientLeft(clientID int64) {
+	for _, client := range app.clients.clients {
+		// clientID here is the client_id of the client who sent the message!
+		msg := fmt.Sprintf("[server] client #%v left the server.\n\n", clientID)
+		_, err := client.Write([]byte(msg))
+		if err != nil {
+			app.logger.Error("error writing to client", slog.Any("error", err))
+			return
+		}
+	}
+}
+
 // handleConnection handles a connection to the server.
 func (app *app) handleConnection(conn net.Conn) {
 	clientID := app.clients.nextID()
@@ -78,6 +117,7 @@ func (app *app) handleConnection(conn net.Conn) {
 	defer func() {
 		closeErr := conn.Close()
 		app.clients.remove(clientID)
+		app.broadcastServerMessageClientLeft(clientID)
 		if closeErr != nil {
 			app.logger.Error("error closing connection", slog.Any("error", closeErr))
 		}
@@ -188,24 +228,7 @@ func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int6
 		}
 
 	default:
-		// Broadcast message to other clients.
-		otherClients := make(map[int64]net.Conn)
-
-		for k, v := range app.clients.clients {
-			if clientID != k {
-				otherClients[k] = v
-			}
-		}
-
-		for _, client := range otherClients {
-			// clientID here is the client_id of the client who sent the message!
-			msg := fmt.Sprintf("[%v][from #%v] %v\n\n", client.RemoteAddr().String(), clientID, message)
-			_, err := client.Write([]byte(msg))
-			if err != nil {
-				app.logger.Error("error writing to client", slog.Any("error", err))
-				return
-			}
-		}
+		app.broadcastMessage(message, clientID)
 	}
 }
 
@@ -215,6 +238,8 @@ func welcomeMsg(app *app, clientID int64) string {
 		"Welcome to the server!\n"+
 			"You are now connected as client #%d\n"+
 			"Number of clients connected: %d\n\n"+
+			"Be careful! Messages from the server start with a single `[server]` statement.\n"+
+			"Have fun!\n\n"+
 			showSpecialCommands(),
 		clientID,
 		app.clients.count())
