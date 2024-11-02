@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bufio"
+	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"os"
+	"strings"
 )
 
 // app is an instance grouping functionalities of the app.
@@ -20,18 +24,46 @@ func (app *app) errout(msg string, keyvals ...any) {
 
 func (app *app) handleConnection(conn net.Conn) {
 	app.logger.Info("got a connection:", slog.Any("conn", conn.LocalAddr().String()))
-
-	_, err := conn.Write([]byte("hello world!"))
-	if err != nil {
-		app.logger.Error("error writing to client", slog.Any("error", err))
-	}
-
 	defer func() {
 		closeErr := conn.Close()
 		if closeErr != nil {
 			app.logger.Error("error closing connection", slog.Any("error", closeErr))
 		}
 	}()
+
+	rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
+
+	for {
+		// Read until newline or EOF.
+		message, err := rw.ReadString('\n')
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				app.logger.Info("client disconnected", slog.Any("IP", conn.RemoteAddr().String()))
+			} else {
+				app.logger.Error("error reading client message", slog.Any("error", err))
+			}
+			break
+		}
+
+		trimmedMessage := strings.TrimSpace(message)
+		app.logger.Info("received message",
+			slog.String(conn.RemoteAddr().String(), trimmedMessage))
+
+		_, err = rw.WriteString("hello from server!\r\n")
+		if err != nil {
+			app.logger.Error("error writing to client", slog.Any("error", err))
+			closeErr := conn.Close()
+			if closeErr != nil {
+				app.logger.Error("error closing connection", slog.Any("error", closeErr))
+			}
+		}
+
+		// Flush the buffer to ensuire data is sent.
+		err = rw.Flush()
+		if err != nil {
+			app.logger.Error("error flushing data", slog.Any("error", err))
+		}
+	}
 }
 
 func main() {

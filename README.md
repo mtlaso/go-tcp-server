@@ -11,3 +11,4 @@ REQUIREMENTS
 - Pouvoir voir les messages en temps-reel (tail --follow)
 - limite connection
     - afficher un message si plus de 5 conn, mettre dans un pool (queue ?)
+- Faire un test pour savoir le nb max de connections que le serveur peut supporter
