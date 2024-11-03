@@ -42,11 +42,9 @@ func (c *clients) addToWaitingQueue(clientID int64) {
 	c.waitingQueueIDs = append(c.waitingQueueIDs, clientID)
 }
 
-// updateWaitingQueue removes a client from the waiting list, either by its cliendtID
+// updateWaitingQueue removes a client from the waiting queue, either by its clientID
 // if the client that just left was inside the waiting queue,
-// or removes the next client in the waiting queue (first in slice),
-// so it can send messages to other users (the server will broadcast their messages).
-// Will also broadcast the queue status to the clients in the waiting list.
+// or removes the next client in the waiting queue (first index in slice).
 //
 // If clientID is -1, it will remove the next client from the waiting queue.
 func (c *clients) updateWaitingQueue(clientID int64) {
@@ -92,7 +90,7 @@ func (c *clients) remove(clientID int64) {
 	delete(c.clients, clientID)
 	c.mu.Unlock() // Unlock now to prevent deadlock.
 
-	// c.updateWaitingQueue(clientID)
+	c.updateWaitingQueue(clientID)
 }
 
 // count returns the number of clients connected to the server.
@@ -173,16 +171,12 @@ func (app *app) broadcastQueueStatusToClientsWaiting() {
 
 	app.clients.mu.RLock()
 	for k, v := range app.clients.clients {
-		fmt.Println("client", k, v)
-		fmt.Println("wq", app.clients.waitingQueueIDs)
 		idxInsideWaitingQueue := app.clients.indexClientInWaitingQueue(k)
 		if idxInsideWaitingQueue != -1 {
 			clientsInWaitingQueue[int64(idxInsideWaitingQueue)] = v
 		}
 	}
 	app.clients.mu.RUnlock()
-
-	fmt.Println("len of clientsInWaitingQueue", len(clientsInWaitingQueue))
 
 	for k, client := range clientsInWaitingQueue {
 		msg := fmt.Sprintf("You are in the position %d in the queue.\n\n", k)
