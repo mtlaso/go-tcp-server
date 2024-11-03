@@ -42,9 +42,32 @@ func (c *clients) addToWaitingQueue(clientID int64) {
 	c.waitingQueueIDs = append(c.waitingQueueIDs, clientID)
 }
 
-// isClientInsideWaitingQueue returns the index of the client by it's clientID if it is inside the waiting queue.
+// updateWaitingQueue removes a client from the waiting list, either by its cliendtID
+// if the client that just left was inside the waiting queue,
+// or removes the next client in the waiting queue (first in slice),
+// so it can send messages to other users (the server will broadcast their messages).
+// Will also broadcast the queue status to the clients in the waiting list.
+//
+// If clientID is -1, it will remove the next client from the waiting queue.
+func (c *clients) updateWaitingQueue(clientID int64) {
+	idx := c.indexClientInWaitingQueue(clientID)
+
+	c.mu.Lock()
+	if len(c.waitingQueueIDs) != 0 {
+		if idx == -1 {
+			_, c.waitingQueueIDs = c.waitingQueueIDs[0], c.waitingQueueIDs[1:]
+		} else {
+			c.waitingQueueIDs = slices.DeleteFunc(c.waitingQueueIDs, func(el int64) bool {
+				return el == clientID
+			})
+		}
+	}
+	c.mu.Unlock()
+}
+
+// indexClientInWaitingQueue returns the index of the client, by it's clientID, if it's inside the waiting queue.
 // If the clientID is not inside the waiting queue, it returns -1.
-func (c *clients) isClientInsideWaitingQueue(clientID int64) int {
+func (c *clients) indexClientInWaitingQueue(clientID int64) int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return slices.IndexFunc(c.waitingQueueIDs, func(el int64) bool {
@@ -56,18 +79,20 @@ func (c *clients) isClientInsideWaitingQueue(clientID int64) int {
 func (c *clients) add(id int64, conn net.Conn) {
 	c.mu.Lock()
 	c.clients[id] = conn
-	c.mu.Unlock() // Unlock now to avoid deadlock inside addToWaitingQueue()!
+	c.mu.Unlock() // Unlock now to avoid deadlock inside addToWaitingQueue().
 
 	if len(c.clients) > c.maxConnectedClients {
 		c.addToWaitingQueue(id)
 	}
 }
 
-// remove removes a client from the clients list.
-func (c *clients) remove(id int64) {
+// remove removes a client from the clients list and updates the waiting queue.
+func (c *clients) remove(clientID int64) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.clients, id)
+	delete(c.clients, clientID)
+	c.mu.Unlock() // Unlock now to prevent deadlock.
+
+	// c.updateWaitingQueue(clientID)
 }
 
 // count returns the number of clients connected to the server.
@@ -89,23 +114,20 @@ type app struct {
 	clients *clients
 }
 
-// errorout prints the error and terminates the program.
-func (app *app) errout(msg string, keyvals ...any) {
-	app.logger.Error(msg, keyvals...)
-	panic(1)
-}
-
-// broadcastMessage broadcasts a message to all other clients except the one who sent the message.
+// broadcastMessage broadcasts a message to all other clients except the one who sent the broadcastMessage
+// and the ones who are inside the waiting queue.
 //
 // clientID : client ID of the client who sent the message.
 func (app *app) broadcastMessage(message string, clientID int64) {
 	otherClients := make(map[int64]net.Conn)
 
+	app.clients.mu.RLock()
 	for k, v := range app.clients.clients {
-		if clientID != k {
+		if k != clientID && !slices.Contains(app.clients.waitingQueueIDs, k) {
 			otherClients[k] = v
 		}
 	}
+	app.clients.mu.RUnlock()
 
 	for _, client := range otherClients {
 		// clientID here is the client_id of the client who sent the message!
@@ -119,15 +141,51 @@ func (app *app) broadcastMessage(message string, clientID int64) {
 }
 
 // broadcastServerMessageClientLeft broadcasts an official server message to all
-// other clients about a client that left.
+// other clients and clients not inside the waiting queue that the client with clientID left.
 //
 // clientID : client ID of the client who left.
 func (app *app) broadcastServerMessageClientLeft(clientID int64) {
+	otherClients := make(map[int64]net.Conn)
+
 	app.clients.mu.RLock()
-	defer app.clients.mu.RUnlock()
-	for _, client := range app.clients.clients {
+	for k, v := range app.clients.clients {
+		if k != clientID && !slices.Contains(app.clients.waitingQueueIDs, k) {
+			otherClients[k] = v
+		}
+	}
+	app.clients.mu.RUnlock()
+
+	for _, client := range otherClients {
 		// clientID here is the client_id of the client who sent the message!
 		msg := fmt.Sprintf("[server] client #%v left the server.\n\n", clientID)
+		_, err := client.Write([]byte(msg))
+		if err != nil {
+			app.logger.Error("error writing to client", slog.Any("error", err))
+			return
+		}
+	}
+}
+
+// broadcastQueueStatusToClientsWaiting broadcasts the status of the waiting queue
+// to the clients who are in the waiting queue.
+func (app *app) broadcastQueueStatusToClientsWaiting() {
+	clientsInWaitingQueue := make(map[int64]net.Conn)
+
+	app.clients.mu.RLock()
+	for k, v := range app.clients.clients {
+		fmt.Println("client", k, v)
+		fmt.Println("wq", app.clients.waitingQueueIDs)
+		idxInsideWaitingQueue := app.clients.indexClientInWaitingQueue(k)
+		if idxInsideWaitingQueue != -1 {
+			clientsInWaitingQueue[int64(idxInsideWaitingQueue)] = v
+		}
+	}
+	app.clients.mu.RUnlock()
+
+	fmt.Println("len of clientsInWaitingQueue", len(clientsInWaitingQueue))
+
+	for k, client := range clientsInWaitingQueue {
+		msg := fmt.Sprintf("You are in the position %d in the queue.\n\n", k)
 		_, err := client.Write([]byte(msg))
 		if err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
@@ -210,19 +268,24 @@ func main() {
 		"maximum of connected clients at the same time")
 	flag.Parse()
 
+	if *maxConnectedClients <= 1 {
+		panic("cannot have 1 or less as max-connected-clients")
+	}
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	app := &app{
 		logger: logger,
 		clients: &clients{
 			clients:             make(map[int64]net.Conn),
 			maxConnectedClients: *maxConnectedClients,
-			waitingQueueIDs:     make([]int64, *maxConnectedClients),
+			waitingQueueIDs:     make([]int64, 0, *maxConnectedClients),
 		},
 	}
 
 	ln, err := net.Listen("tcp", "localhost:8080")
 	if err != nil {
-		app.errout("failed to listen", slog.Any("error", err))
+		app.logger.Error("failed to listen", slog.Any("error", err))
+		panic(err)
 	}
 	app.logger.Info("tcp server listening for connections...")
 
@@ -240,8 +303,12 @@ func main() {
 }
 
 func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int64) {
+	idxInsideWaitingQueue := app.clients.indexClientInWaitingQueue(clientID)
+
 	switch {
 	case len(message) == 0:
+		return
+	case idxInsideWaitingQueue != -1:
 		return
 	case message == commandCountClients:
 		count := fmt.Sprintf("[server] %d\n\n", app.clients.count())
@@ -272,13 +339,13 @@ func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int6
 // showWelcomeMsg returns the welcome message.
 func showWelcomeMsg(app *app, clientID int64) string {
 	var welcomeMsg string
-	idxInsideWaitingQueue := app.clients.isClientInsideWaitingQueue(clientID)
+	idxInsideWaitingQueue := app.clients.indexClientInWaitingQueue(clientID)
 
 	if idxInsideWaitingQueue != -1 {
 		welcomeMsg = fmt.Sprintf(
 			"You are inside the waiting queue, please wait to enter the discussion!\n"+
-				"You are in the position %d in the queue.",
-			idxInsideWaitingQueue)
+				"You are in the position %d in the queue.\n\n",
+			idxInsideWaitingQueue+1)
 	} else {
 		welcomeMsg = fmt.Sprintf(
 			"Welcome to the server!\n"+

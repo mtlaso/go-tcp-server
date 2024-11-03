@@ -19,3 +19,6 @@ REQUIREMENTS
 - [ ] ajouter un/des jeux ?? (guess small word?)
 - [ ] Faire un test pour savoir le nb max de connections que le serveur peut supporter
 - [ ] Ajouter encryption (tls?)
+- [ ] /count => nb personnes qui peuvent chatter (moins personnes dans en attente)
+- [ ] /wq => nb personnes qui attendent
+- [ ] enlever \n\n 2 fois en envoyant messages
