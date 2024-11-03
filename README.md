@@ -13,6 +13,7 @@ REQUIREMENTS
 - [ ] limite connection
     - [ ] afficher un message si plus de 5 conn, mettre dans un pool (queue ?)
     - [ ] utiliser un param (--max-concurrent-clients-at-a-time)
+- [ ] max num of char (200 ?)
 - [ ] traductions des messages du serveur avec commande
 - [ ] traductions des messages des clients en temps réel (avec commande spéciale)
 - [ ] ajouter un/des jeux ?? (guess small word?)

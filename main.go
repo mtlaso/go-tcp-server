@@ -3,11 +3,13 @@ package main
 import (
 	"bufio"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,21 +21,46 @@ const (
 	commandSpecialCommands     = "/help"
 	commandSpecialCommandsDesc = "show special commands"
 	commandUnknowError         = "unknown command"
+	defaultMaxConnectedClients = 100
 )
 
 // clients represents the clients connected to the server.
 type clients struct {
-	clients map[int64]net.Conn
-	mu      sync.RWMutex
+	clients             map[int64]net.Conn
+	waitingQueueIDs     []int64
+	mu                  sync.RWMutex
+	maxConnectedClients int
 	// Do NOT! change this field directly!
 	id int64
+}
+
+// addToWaitingQueue adds a client to the waiting queue by it's clientID,
+// to prevent broadcasting their messages.
+func (c *clients) addToWaitingQueue(clientID int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.waitingQueueIDs = append(c.waitingQueueIDs, clientID)
+}
+
+// isClientInsideWaitingQueue returns the index of the client by it's clientID if it is inside the waiting queue.
+// If the clientID is not inside the waiting queue, it returns -1.
+func (c *clients) isClientInsideWaitingQueue(clientID int64) int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return slices.IndexFunc(c.waitingQueueIDs, func(el int64) bool {
+		return el == clientID
+	})
 }
 
 // add adds a client to the clients list.
 func (c *clients) add(id int64, conn net.Conn) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.clients[id] = conn
+	c.mu.Unlock() // Unlock now to avoid deadlock inside addToWaitingQueue()!
+
+	if len(c.clients) > c.maxConnectedClients {
+		c.addToWaitingQueue(id)
+	}
 }
 
 // remove removes a client from the clients list.
@@ -128,13 +155,13 @@ func (app *app) handleConnection(conn net.Conn) {
 	rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
 
 	// Welcome message.
-	_, err := rw.WriteString(welcomeMsg(app, clientID))
+	_, err := rw.WriteString(showWelcomeMsg(app, clientID))
 	if err != nil {
 		app.logger.Error("error writing to client", slog.Any("error", err))
 		return
 	}
 
-	// Flush to send welcome message directly to the client.
+	// Flush to send the welcome message directly to the client.
 	err = rw.Flush()
 	if err != nil {
 		app.logger.Error("error flushing data", slog.Any("error", err))
@@ -177,11 +204,19 @@ func (app *app) handleConnection(conn net.Conn) {
 }
 
 func main() {
+	maxConnectedClients := flag.Int(
+		"max-connected-clients",
+		defaultMaxConnectedClients,
+		"maximum of connected clients at the same time")
+	flag.Parse()
+
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	app := &app{
 		logger: logger,
 		clients: &clients{
-			clients: make(map[int64]net.Conn),
+			clients:             make(map[int64]net.Conn),
+			maxConnectedClients: *maxConnectedClients,
+			waitingQueueIDs:     make([]int64, *maxConnectedClients),
 		},
 	}
 
@@ -234,17 +269,27 @@ func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int6
 	}
 }
 
-// welcomeMsg returns the welcome message.
-func welcomeMsg(app *app, clientID int64) string {
-	welcomeMsg := fmt.Sprintf(
-		"Welcome to the server!\n"+
-			"You are now connected as client #%d\n"+
-			"Number of clients connected: %d\n\n"+
-			"Be careful! Messages from the server start with a single `[server]` statement.\n"+
-			"Have fun!\n\n"+
-			showSpecialCommands(),
-		clientID,
-		app.clients.count())
+// showWelcomeMsg returns the welcome message.
+func showWelcomeMsg(app *app, clientID int64) string {
+	var welcomeMsg string
+	idxInsideWaitingQueue := app.clients.isClientInsideWaitingQueue(clientID)
+
+	if idxInsideWaitingQueue != -1 {
+		welcomeMsg = fmt.Sprintf(
+			"You are inside the waiting queue, please wait to enter the discussion!\n"+
+				"You are in the position %d in the queue.",
+			idxInsideWaitingQueue)
+	} else {
+		welcomeMsg = fmt.Sprintf(
+			"Welcome to the server!\n"+
+				"You are now connected as client #%d\n"+
+				"Number of clients connected: %d\n\n"+
+				"Be careful! Messages from the server start with a single `[server]` statement.\n"+
+				"Have fun!\n\n"+
+				showSpecialCommands(),
+			clientID,
+			app.clients.count())
+	}
 
 	return welcomeMsg
 }
