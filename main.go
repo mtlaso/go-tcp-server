@@ -16,13 +16,17 @@ import (
 )
 
 const (
-	commandCountClients        = "/count"
-	commandCountClientsDesc    = "number of connected clients to the server"
-	commandSpecialCommands     = "/help"
-	commandSpecialCommandsDesc = "show special commands"
-	commandUnknowError         = "unknown command"
-	maxConnectedClients        = 100
-	maxLenMsg                  = 200
+	commandCountClients            = "/count"
+	commandCountClientsDesc        = "number of connected clients to the server"
+	commandSpecialCommands         = "/help"
+	commandSpecialCommandsDesc     = "show special commands"
+	commandUnknowError             = "unknown command"
+	maxLenMsg                      = 200
+	flagMaxConnectedClients        = "max-connected-clients"
+	flagMaxConnectedClientsDefault = 100
+	flagMaxConnectedClientsDesc    = "maximum of connected clients at the same time"
+	flagSaveLogs                   = "save-logs"
+	flagSaveLogsDesc               = "save logs to a file (ex : --save-logs path/to/file.txt)"
 )
 
 // clients represents the clients connected to the server.
@@ -258,9 +262,9 @@ func (app *app) handleConnection(conn net.Conn) {
 
 func main() {
 	maxConnectedClients := flag.Int(
-		"max-connected-clients",
-		maxConnectedClients,
-		"maximum of connected clients at the same time")
+		flagMaxConnectedClients,
+		flagMaxConnectedClientsDefault,
+		flagMaxConnectedClientsDesc)
 	flag.Parse()
 
 	if *maxConnectedClients <= 1 {
