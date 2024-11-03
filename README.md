@@ -21,4 +21,4 @@ REQUIREMENTS
 - [ ] Ajouter encryption (tls?)
 - [ ] /count => nb personnes qui peuvent chatter (moins personnes dans en attente)
 - [ ] /wq => nb personnes qui attendent
-- [ ] enlever \n\n 2 fois en envoyant messages
+- [x] enlever \n\n 2 fois en envoyant messages

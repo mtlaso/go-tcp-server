@@ -34,8 +34,7 @@ type clients struct {
 	id int64
 }
 
-// addToWaitingQueue adds a client to the waiting queue by it's clientID,
-// to prevent broadcasting their messages.
+// addToWaitingQueue adds a client to the waiting queue.
 func (c *clients) addToWaitingQueue(clientID int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -68,9 +67,7 @@ func (c *clients) updateWaitingQueue(clientID int64) {
 func (c *clients) indexClientInWaitingQueue(clientID int64) int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return slices.IndexFunc(c.waitingQueueIDs, func(el int64) bool {
-		return el == clientID
-	})
+	return slices.Index(c.waitingQueueIDs, clientID)
 }
 
 // add adds a client to the clients list.
@@ -129,7 +126,7 @@ func (app *app) broadcastMessage(message string, clientID int64) {
 
 	for _, client := range otherClients {
 		// clientID here is the client_id of the client who sent the message!
-		msg := fmt.Sprintf("[%v][from #%v] %v\n\n", client.RemoteAddr().String(), clientID, message)
+		msg := fmt.Sprintf("[%v][client #%v] %v\n", client.RemoteAddr().String(), clientID, message)
 		_, err := client.Write([]byte(msg))
 		if err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
@@ -191,10 +188,12 @@ func (app *app) broadcastQueueStatusToClientsWaiting() {
 // handleConnection handles a connection to the server.
 func (app *app) handleConnection(conn net.Conn) {
 	clientID := app.clients.nextID()
+
 	app.clients.add(clientID, conn)
 	app.logger.Info("got a connection:",
 		slog.Any("client_id", clientID),
 		slog.Any("remote_addr", conn.RemoteAddr().String()))
+
 	defer func() {
 		closeErr := conn.Close()
 		app.clients.remove(clientID)
