@@ -13,12 +13,9 @@ REQUIREMENTS
 - [x] limite connection
     - [x] afficher un message si plus de 5 conn, mettre dans un pool (queue ?)
     - [x] utiliser un param (--max-concurrent-clients-at-a-time)
-- [ ] max num of char (200 ?)
+- [x] max num of char (200 ?)
 - [ ] traductions des messages du serveur avec commande
 - [ ] traductions des messages des clients en temps réel (avec commande spéciale)
 - [ ] ajouter un/des jeux ?? (guess small word?)
 - [ ] Faire un test pour savoir le nb max de connections que le serveur peut supporter
-- [ ] Ajouter encryption (tls?)
-- [ ] /count => nb personnes qui peuvent chatter (moins personnes dans en attente)
-- [ ] /wq => nb personnes qui attendent
 - [x] enlever \n\n 2 fois en envoyant messages

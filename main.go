@@ -21,7 +21,8 @@ const (
 	commandSpecialCommands     = "/help"
 	commandSpecialCommandsDesc = "show special commands"
 	commandUnknowError         = "unknown command"
-	defaultMaxConnectedClients = 100
+	maxConnectedClients        = 100
+	maxLenMsg                  = 200
 )
 
 // clients represents the clients connected to the server.
@@ -258,7 +259,7 @@ func (app *app) handleConnection(conn net.Conn) {
 func main() {
 	maxConnectedClients := flag.Int(
 		"max-connected-clients",
-		defaultMaxConnectedClients,
+		maxConnectedClients,
 		"maximum of connected clients at the same time")
 	flag.Parse()
 
@@ -296,29 +297,29 @@ func main() {
 	}
 }
 
-func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int64) {
+func handleMessage(msg string, app *app, rw *bufio.ReadWriter, clientID int64) {
 	idxInsideWaitingQueue := app.clients.indexClientInWaitingQueue(clientID)
 
 	switch {
-	case len(message) == 0:
+	case len(msg) == 0 || len(msg) > maxLenMsg:
 		return
 	case idxInsideWaitingQueue != -1:
 		return
-	case message == commandCountClients:
+	case msg == commandCountClients:
 		count := fmt.Sprintf("[server] %d\n\n", app.clients.count())
 		_, err := rw.WriteString(count)
 		if err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
 			return
 		}
-	case message == commandSpecialCommands:
+	case msg == commandSpecialCommands:
 		_, err := rw.WriteString(showSpecialCommands())
 		if err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
 			return
 		}
-	case message[0] == '/':
-		msg := fmt.Sprintf("[server] %v '%v'\n\n", commandUnknowError, message)
+	case msg[0] == '/':
+		msg := fmt.Sprintf("[server] %v '%v'\n\n", commandUnknowError, msg)
 		_, err := rw.WriteString(msg)
 		if err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
@@ -326,7 +327,7 @@ func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int6
 		}
 
 	default:
-		app.broadcastMessage(message, clientID)
+		app.broadcastMessage(msg, clientID)
 	}
 }
 
