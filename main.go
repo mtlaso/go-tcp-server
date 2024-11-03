@@ -171,15 +171,15 @@ func (app *app) broadcastQueueStatusToClientsWaiting() {
 
 	app.clients.mu.RLock()
 	for k, v := range app.clients.clients {
-		idxInsideWaitingQueue := app.clients.indexClientInWaitingQueue(k)
-		if idxInsideWaitingQueue != -1 {
-			clientsInWaitingQueue[int64(idxInsideWaitingQueue)] = v
+		idx := slices.Index(app.clients.waitingQueueIDs, k)
+		if idx != -1 {
+			clientsInWaitingQueue[int64(idx)] = v
 		}
 	}
 	app.clients.mu.RUnlock()
 
 	for k, client := range clientsInWaitingQueue {
-		msg := fmt.Sprintf("You are in the position %d in the queue.\n\n", k)
+		msg := fmt.Sprintf("You are in the position %d in the queue.\n\n", k+1)
 		_, err := client.Write([]byte(msg))
 		if err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
@@ -199,6 +199,7 @@ func (app *app) handleConnection(conn net.Conn) {
 		closeErr := conn.Close()
 		app.clients.remove(clientID)
 		app.broadcastServerMessageClientLeft(clientID)
+		app.broadcastQueueStatusToClientsWaiting()
 		if closeErr != nil {
 			app.logger.Error("error closing connection", slog.Any("error", closeErr))
 		}
