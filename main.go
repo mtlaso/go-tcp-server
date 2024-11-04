@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,10 +10,13 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/signal"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
+	"time"
 
 	"example.com/tcp-clients/words"
 )
@@ -31,6 +35,7 @@ const (
 	flagMaxConnectedClients        = "max-connected-clients"
 	flagMaxConnectedClientsDefault = 100
 	flagMaxConnectedClientsDesc    = "maximum of connected clients at the same time"
+	rwDeadlineTimeout              = 10
 )
 
 // guessWordGameEngine represents the game data when playing the guess word game.
@@ -291,11 +296,11 @@ func (app *app) broadcastQueueStatusToClientsWaiting() {
 }
 
 // handleConnection handles a connection to the server.
-func (app *app) handleConnection(conn net.Conn) {
+func (app *app) handleConnection(ctx context.Context, conn net.Conn) {
 	clientID := app.clients.nextID()
 
 	app.clients.add(clientID, conn)
-	app.logger.Info("got a connection:",
+	app.logger.InfoContext(ctx, "got a connection:",
 		slog.Any("client_id", clientID),
 		slog.Any("remote_addr", conn.RemoteAddr().String()))
 
@@ -313,47 +318,67 @@ func (app *app) handleConnection(conn net.Conn) {
 
 	_, err := rw.WriteString(showWelcomeMsg(app, clientID))
 	if err != nil {
-		app.logger.Error("error writing to client", slog.Any("error", err))
+		app.logger.ErrorContext(ctx, "error writing to client", slog.Any("error", err))
 		return
 	}
 
 	// Flush to send the welcome message directly to the client.
 	err = rw.Flush()
 	if err != nil {
-		app.logger.Error("error flushing data", slog.Any("error", err))
+		app.logger.ErrorContext(ctx, "error flushing data", slog.Any("error", err))
 		return
 	}
 
 	for {
-		var message string
-
-		message, err = rw.ReadString('\n')
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				app.logger.Info("client disconnected",
-					slog.Any("client_id", clientID),
-					slog.Any("remote_addr", conn.RemoteAddr().String()))
-			} else {
-				app.logger.Error("error reading client message",
-					slog.Any("client_id", clientID),
-					slog.Any("error", err))
+		select {
+		case <-ctx.Done():
+			if _, err = rw.WriteString("[server] closing server...good bye"); err != nil {
+				app.logger.ErrorContext(ctx, "error writing shutdown message", slog.Any("error", err))
 			}
+
+			if err = rw.Flush(); err != nil {
+				app.logger.ErrorContext(ctx, "error writing shutdown message", slog.Any("error", err))
+			}
+
 			return
-		}
+		default:
+			if deadlineErr := conn.SetDeadline(time.Now().Add(time.Second * rwDeadlineTimeout)); deadlineErr != nil {
+				app.logger.ErrorContext(ctx, "error setting read deadline", slog.Any("error", err))
+			}
+			var message string
 
-		trimmedMessage := strings.TrimSpace(message)
-		app.logger.Info("received message",
-			slog.String("remote_addr", conn.RemoteAddr().String()),
-			slog.Any("client_id", clientID),
-			slog.String("message", trimmedMessage))
+			message, err = rw.ReadString('\n')
+			if err != nil {
+				if errors.Is(err, os.ErrDeadlineExceeded) {
+					continue
+				}
 
-		handleMessage(trimmedMessage, app, rw, clientID)
+				if errors.Is(err, io.EOF) {
+					app.logger.InfoContext(ctx, "client disconnected",
+						slog.Any("client_id", clientID),
+						slog.Any("remote_addr", conn.RemoteAddr().String()))
+				} else {
+					app.logger.ErrorContext(ctx, "error reading client message",
+						slog.Any("client_id", clientID),
+						slog.Any("error", err))
+				}
+				return
+			}
 
-		// Flush the buffer to ensure data is sent.
-		err = rw.Flush()
-		if err != nil {
-			app.logger.Error("error flushing data", slog.Any("error", err))
-			return
+			trimmedMessage := strings.TrimSpace(message)
+			app.logger.InfoContext(ctx, "received message",
+				slog.String("remote_addr", conn.RemoteAddr().String()),
+				slog.Any("client_id", clientID),
+				slog.String("message", trimmedMessage))
+
+			handleMessage(trimmedMessage, app, rw, clientID)
+
+			// Flush the buffer to ensure data is sent.
+			err = rw.Flush()
+			if err != nil {
+				app.logger.ErrorContext(ctx, "error flushing data", slog.Any("error", err))
+				return
+			}
 		}
 	}
 }
@@ -385,6 +410,12 @@ func main() {
 		},
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigsChan := make(chan os.Signal, 1)
+	signal.Notify(sigsChan, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
+
 	ln, err := net.Listen("tcp", "localhost:8080")
 	if err != nil {
 		app.logger.Error("failed to listen", slog.Any("error", err))
@@ -392,17 +423,44 @@ func main() {
 	}
 	app.logger.Info("tcp server listening for connections...")
 
+	// Goroutine to listen for signals.
+	go func() {
+		<-sigsChan
+		app.logger.Info("Shutting down the server...")
+		cancel()
+		if closeErr := ln.Close(); closeErr != nil {
+			app.logger.Error(
+				"error while closing the tcp connection",
+				slog.Any("error", err))
+		}
+	}()
+
+	var wg sync.WaitGroup
+
+AcceptLoop:
 	for {
 		var conn net.Conn
 
 		conn, err = ln.Accept()
 		if err != nil {
-			app.logger.Warn("cannot accept connection", slog.Any("error", err))
-			continue
+			select {
+			case <-ctx.Done():
+				break AcceptLoop
+			default:
+				app.logger.Warn("cannot accept connection", slog.Any("error", err))
+				continue
+			}
 		}
 
-		go app.handleConnection(conn)
+		wg.Add(1)
+		go func(c net.Conn) {
+			defer wg.Done()
+			app.handleConnection(ctx, c)
+		}(conn)
 	}
+
+	wg.Wait()
+	app.logger.Info("server shutdown")
 }
 
 // handleMessage handles the message send to the server accordingly.
@@ -539,7 +597,7 @@ func showWelcomeMsg(app *app, clientID int64) string {
 // showSpecialCommands returns the list of commands.
 func showSpecialCommands() string {
 	commandsMsg := fmt.Sprintf(
-		"Special commands:\n"+
+		"[server] Special commands:\n"+
 			"\t%v \t\t %v\n"+
 			"\t%v \t %v\n"+
 			"\t%v \t\t %v\n"+
