@@ -1,3 +1,4 @@
+// Package words manages the generation of random words.
 package words
 
 import (

@@ -1,3 +1,4 @@
+// Package client manages clients that connect to the server.
 package client
 
 import (

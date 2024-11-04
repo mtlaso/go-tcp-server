@@ -1,3 +1,13 @@
+// Package main implements a concurrent TCP chat server with support for
+// multiple clients, message broadcasting, and word guessing games.
+//
+// Basic usage:
+//
+//	go run main.go --max-connected-clients=10 --listen-addr=localhost:8080
+//
+// Connect to the server using netcat:
+//
+//	nc -q -1 localhost 8080
 package main
 
 import (
@@ -18,7 +28,7 @@ import (
 	"time"
 
 	"example.com/tcp-clients/client"
-	"example.com/tcp-clients/game"
+	"example.com/tcp-clients/guessword"
 	"example.com/tcp-clients/words"
 )
 
@@ -45,7 +55,7 @@ const (
 type app struct {
 	logger              *slog.Logger
 	clients             *client.Clients
-	guessWordGameEngine *game.GuessWordGameEngine
+	guessWordGameEngine *guessword.GameEngine
 }
 
 // broadcastMessage broadcasts a message to all other clients except the one who sent the broadcastMessage
@@ -288,7 +298,7 @@ func main() {
 			MaxConnectedClients: *maxConnectedClients,
 			WaitingQueueIDs:     make([]int64, 0, *maxConnectedClients),
 		},
-		guessWordGameEngine: &game.GuessWordGameEngine{
+		guessWordGameEngine: &guessword.GameEngine{
 			Word:    "",
 			Tries:   0,
 			Started: false,

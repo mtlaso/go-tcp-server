@@ -1,8 +1,9 @@
-package game
+// Package guessword manages the word guess game.
+package guessword
 
 import "sync"
 
-type GuessWordGameEngine struct {
+type GameEngine struct {
 	Word    string
 	Mu      sync.RWMutex
 	Tries   int
@@ -10,10 +11,10 @@ type GuessWordGameEngine struct {
 }
 
 // NewGame initialises a new game engine.
-func (ge *GuessWordGameEngine) NewGame(word string) *GuessWordGameEngine {
+func (ge *GameEngine) NewGame(word string) *GameEngine {
 	ge.Mu.Lock()
 	defer ge.Mu.Unlock()
-	return &GuessWordGameEngine{
+	return &GameEngine{
 		Word:    word,
 		Tries:   0,
 		Started: true,
@@ -22,7 +23,7 @@ func (ge *GuessWordGameEngine) NewGame(word string) *GuessWordGameEngine {
 
 // CheckWord checks if the word was found.
 // If found, it returns true and ends the game.
-func (ge *GuessWordGameEngine) CheckWord(word string) bool {
+func (ge *GameEngine) CheckWord(word string) bool {
 	ge.Mu.Lock()
 	defer func() {
 		ge.Tries++
@@ -43,7 +44,7 @@ func (ge *GuessWordGameEngine) CheckWord(word string) bool {
 // EndGame end a game that started.
 //
 // Return true if the game just ended.
-func (ge *GuessWordGameEngine) EndGame() bool {
+func (ge *GameEngine) EndGame() bool {
 	ge.Mu.Lock()
 	defer ge.Mu.Unlock()
 	if ge.Started {
