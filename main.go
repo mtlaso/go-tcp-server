@@ -166,6 +166,18 @@ func (app *app) broadcastQueueStatusToClientsWaiting() {
 	}
 }
 
+// broadcastServerShutdown broadcast to the clients that the server is shutting down.
+func (app *app) broadcastServerShutdown() {
+	app.clients.Mu.RLock()
+	defer app.clients.Mu.RUnlock()
+	for _, client := range app.clients.Clients {
+		msg := "[server] the server is shutting down. Goodbye!\n"
+		if _, err := client.Write([]byte(msg)); err != nil {
+			app.logger.Error("error writing shutdown message to client", slog.Any("error", err))
+		}
+	}
+}
+
 // handleConnection handles a connection to the server.
 func (app *app) handleConnection(ctx context.Context, conn net.Conn) {
 	clientID := app.clients.NextID()
@@ -300,6 +312,7 @@ func main() {
 	go func() {
 		<-sigsChan
 		app.logger.Info("Shutting down the server...")
+		app.broadcastServerShutdown()
 		cancel()
 		if closeErr := ln.Close(); closeErr != nil {
 			app.logger.Error(
