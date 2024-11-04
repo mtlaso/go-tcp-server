@@ -35,7 +35,9 @@ const (
 	flagMaxConnectedClients        = "max-connected-clients"
 	flagMaxConnectedClientsDefault = 100
 	flagMaxConnectedClientsDesc    = "maximum of connected clients at the same time"
-	rwDeadlineTimeout              = 10
+	flagListenAddr                 = "listen-addr"
+	flagListenAddrDefault          = "localhost:8080"
+	flagListenAddrDesc             = "server listen address (ex : listen-addr=localhost:8080)"
 )
 
 // guessWordGameEngine represents the game data when playing the guess word game.
@@ -332,17 +334,9 @@ func (app *app) handleConnection(ctx context.Context, conn net.Conn) {
 	for {
 		select {
 		case <-ctx.Done():
-			if _, err = rw.WriteString("[server] closing server...good bye"); err != nil {
-				app.logger.ErrorContext(ctx, "error writing shutdown message", slog.Any("error", err))
-			}
-
-			if err = rw.Flush(); err != nil {
-				app.logger.ErrorContext(ctx, "error writing shutdown message", slog.Any("error", err))
-			}
-
 			return
 		default:
-			if deadlineErr := conn.SetDeadline(time.Now().Add(time.Second * rwDeadlineTimeout)); deadlineErr != nil {
+			if deadlineErr := conn.SetDeadline(time.Now().Add(time.Second * 1)); deadlineErr != nil {
 				app.logger.ErrorContext(ctx, "error setting read deadline", slog.Any("error", err))
 			}
 			var message string
@@ -389,10 +383,19 @@ func main() {
 		flagMaxConnectedClientsDefault,
 		flagMaxConnectedClientsDesc)
 
+	listenAddr := flag.String(
+		flagListenAddr,
+		flagListenAddrDefault,
+		flagListenAddrDesc)
+
 	flag.Parse()
 
 	if *maxConnectedClients <= 1 {
-		panic("cannot have 1 or less as max-connected-clients")
+		panic("cannot have 1 or less as" + flagMaxConnectedClients)
+	}
+
+	if *listenAddr == "" {
+		panic("enter a valid" + flagListenAddr)
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
