@@ -14,10 +14,11 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
+	"example.com/tcp-clients/client"
+	"example.com/tcp-clients/game"
 	"example.com/tcp-clients/words"
 )
 
@@ -30,7 +31,6 @@ const (
 	commandGameDesc                = "play guess a word with other users (english words)"
 	commandEndGame                 = "/endgame"
 	commandEndGameDesc             = "end game session"
-	commandUnknowError             = "unknown command"
 	maxLenMsg                      = 200
 	flagMaxConnectedClients        = "max-connected-clients"
 	flagMaxConnectedClientsDefault = 100
@@ -40,143 +40,12 @@ const (
 	flagListenAddrDesc             = "server listen address (ex : listen-addr=localhost:8080)"
 )
 
-// guessWordGameEngine represents the game data when playing the guess word game.
-type guessWordGameEngine struct {
-	word    string
-	mu      sync.RWMutex
-	tries   int
-	started bool
-}
-
-// newGame initialises a new game engine.
-func (ge *guessWordGameEngine) newGame(word string) *guessWordGameEngine {
-	ge.mu.Lock()
-	defer ge.mu.Unlock()
-	return &guessWordGameEngine{
-		word:    word,
-		tries:   0,
-		started: true,
-	}
-}
-
-// checkWord checks if the word was found.
-// If found, it returns true and ends the game.
-func (ge *guessWordGameEngine) checkWord(word string) bool {
-	ge.mu.Lock()
-	defer func() {
-		ge.tries++
-		ge.mu.Unlock()
-	}()
-
-	if !ge.started {
-		return false
-	}
-	if word == ge.word {
-		ge.started = false
-		return true
-	}
-
-	return false
-}
-
-// endGame end a game that started.
-//
-// Return true if the game just ended.
-func (ge *guessWordGameEngine) endGame() bool {
-	ge.mu.Lock()
-	defer ge.mu.Unlock()
-	if ge.started {
-		ge.started = false
-		return true
-	}
-
-	return false
-}
-
-// clients represents the clients connected to the server.
-type clients struct {
-	clients             map[int64]net.Conn
-	waitingQueueIDs     []int64
-	mu                  sync.RWMutex
-	maxConnectedClients int
-	// Do NOT! change this field directly!
-	id int64
-}
-
-// addToWaitingQueue adds a client to the waiting queue.
-func (c *clients) addToWaitingQueue(clientID int64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.waitingQueueIDs = append(c.waitingQueueIDs, clientID)
-}
-
-// updateWaitingQueue removes a client from the waiting queue, either by its clientID
-// if the client that just left was inside the waiting queue,
-// or removes the next client in the waiting queue (first index in slice).
-//
-// If clientID is -1, it will remove the next client from the waiting queue.
-func (c *clients) updateWaitingQueue(clientID int64) {
-	idx := c.indexClientInWaitingQueue(clientID)
-
-	c.mu.Lock()
-	if len(c.waitingQueueIDs) != 0 {
-		if idx == -1 {
-			_, c.waitingQueueIDs = c.waitingQueueIDs[0], c.waitingQueueIDs[1:]
-		} else {
-			c.waitingQueueIDs = slices.DeleteFunc(c.waitingQueueIDs, func(el int64) bool {
-				return el == clientID
-			})
-		}
-	}
-	c.mu.Unlock()
-}
-
-// indexClientInWaitingQueue returns the index of the client, by it's clientID, if it's inside the waiting queue.
-// If the clientID is not inside the waiting queue, it returns -1.
-func (c *clients) indexClientInWaitingQueue(clientID int64) int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return slices.Index(c.waitingQueueIDs, clientID)
-}
-
-// add adds a client to the clients list.
-func (c *clients) add(id int64, conn net.Conn) {
-	c.mu.Lock()
-	c.clients[id] = conn
-	c.mu.Unlock() // Unlock now to avoid deadlock inside addToWaitingQueue().
-
-	if len(c.clients) > c.maxConnectedClients {
-		c.addToWaitingQueue(id)
-	}
-}
-
-// remove removes a client from the clients list and updates the waiting queue.
-func (c *clients) remove(clientID int64) {
-	c.mu.Lock()
-	delete(c.clients, clientID)
-	c.mu.Unlock() // Unlock now to prevent deadlock.
-
-	c.updateWaitingQueue(clientID)
-}
-
-// count returns the number of clients connected to the server.
-func (c *clients) count() int {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return len(c.clients)
-}
-
-// nextID returns the next id of a client.
-func (c *clients) nextID() int64 {
-	return atomic.AddInt64(&c.id, 1)
-}
-
 // app is an instance grouping functionalities of the app.
 // Used for dependency injection.
 type app struct {
 	logger              *slog.Logger
-	clients             *clients
-	guessWordGameEngine *guessWordGameEngine
+	clients             *client.Clients
+	guessWordGameEngine *game.GuessWordGameEngine
 }
 
 // broadcastMessage broadcasts a message to all other clients except the one who sent the broadcastMessage
@@ -186,13 +55,13 @@ type app struct {
 func (app *app) broadcastMessage(message string, clientID int64) {
 	otherClients := make(map[int64]net.Conn)
 
-	app.clients.mu.RLock()
-	for k, v := range app.clients.clients {
-		if k != clientID && !slices.Contains(app.clients.waitingQueueIDs, k) {
+	app.clients.Mu.RLock()
+	for k, v := range app.clients.Clients {
+		if k != clientID && !slices.Contains(app.clients.WaitingQueueIDs, k) {
 			otherClients[k] = v
 		}
 	}
-	app.clients.mu.RUnlock()
+	app.clients.Mu.RUnlock()
 
 	for _, client := range otherClients {
 		// clientID here is the client_id of the client who sent the message!
@@ -210,13 +79,13 @@ func (app *app) broadcastMessage(message string, clientID int64) {
 func (app *app) broadcastServerMessageClientLeft(clientID int64) {
 	otherClients := make(map[int64]net.Conn)
 
-	app.clients.mu.RLock()
-	for k, v := range app.clients.clients {
-		if k != clientID && !slices.Contains(app.clients.waitingQueueIDs, k) {
+	app.clients.Mu.RLock()
+	for k, v := range app.clients.Clients {
+		if k != clientID && !slices.Contains(app.clients.WaitingQueueIDs, k) {
 			otherClients[k] = v
 		}
 	}
-	app.clients.mu.RUnlock()
+	app.clients.Mu.RUnlock()
 
 	for _, client := range otherClients {
 		// clientID here is the client_id of the client who sent the message!
@@ -231,22 +100,22 @@ func (app *app) broadcastServerMessageClientLeft(clientID int64) {
 func (app *app) broadcastGameStarted() {
 	clientsThatWillPlay := make(map[int64]net.Conn)
 
-	app.clients.mu.RLock()
-	for k, v := range app.clients.clients {
-		if !slices.Contains(app.clients.waitingQueueIDs, k) {
+	app.clients.Mu.RLock()
+	for k, v := range app.clients.Clients {
+		if !slices.Contains(app.clients.WaitingQueueIDs, k) {
 			clientsThatWillPlay[k] = v
 		}
 	}
-	app.clients.mu.RUnlock()
+	app.clients.Mu.RUnlock()
 
-	app.guessWordGameEngine.mu.RLock()
-	defer app.guessWordGameEngine.mu.RUnlock()
+	app.guessWordGameEngine.Mu.RLock()
+	defer app.guessWordGameEngine.Mu.RUnlock()
 	for _, client := range clientsThatWillPlay {
 		msg := fmt.Sprintf("Guess a word game started! Try to guess to word\n"+
 			"The word has %d letters.\n"+
 			"The word starts with: %v\n\n",
-			len(app.guessWordGameEngine.word),
-			string(app.guessWordGameEngine.word[0]))
+			len(app.guessWordGameEngine.Word),
+			string(app.guessWordGameEngine.Word[0]))
 		if _, err := client.Write([]byte(msg)); err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
 		}
@@ -257,18 +126,18 @@ func (app *app) broadcastGameStarted() {
 func (app *app) broadcastGameEnded() {
 	clientsThatWillPlay := make(map[int64]net.Conn)
 
-	app.clients.mu.RLock()
-	for k, v := range app.clients.clients {
-		if !slices.Contains(app.clients.waitingQueueIDs, k) {
+	app.clients.Mu.RLock()
+	for k, v := range app.clients.Clients {
+		if !slices.Contains(app.clients.WaitingQueueIDs, k) {
 			clientsThatWillPlay[k] = v
 		}
 	}
-	app.clients.mu.RUnlock()
+	app.clients.Mu.RUnlock()
 
 	for _, client := range clientsThatWillPlay {
 		msg := fmt.Sprintf("Guess a word game ended! The word was : %v\n"+
 			"Have a good day!\n\n",
-			app.guessWordGameEngine.word)
+			app.guessWordGameEngine.Word)
 		if _, err := client.Write([]byte(msg)); err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
 		}
@@ -280,14 +149,14 @@ func (app *app) broadcastGameEnded() {
 func (app *app) broadcastQueueStatusToClientsWaiting() {
 	clientsInWaitingQueue := make(map[int64]net.Conn)
 
-	app.clients.mu.RLock()
-	for k, v := range app.clients.clients {
-		idx := slices.Index(app.clients.waitingQueueIDs, k)
+	app.clients.Mu.RLock()
+	for k, v := range app.clients.Clients {
+		idx := slices.Index(app.clients.WaitingQueueIDs, k)
 		if idx != -1 {
 			clientsInWaitingQueue[int64(idx)] = v
 		}
 	}
-	app.clients.mu.RUnlock()
+	app.clients.Mu.RUnlock()
 
 	for k, client := range clientsInWaitingQueue {
 		msg := fmt.Sprintf("You are in the position %d in the queue.\n\n", k+1)
@@ -299,16 +168,16 @@ func (app *app) broadcastQueueStatusToClientsWaiting() {
 
 // handleConnection handles a connection to the server.
 func (app *app) handleConnection(ctx context.Context, conn net.Conn) {
-	clientID := app.clients.nextID()
+	clientID := app.clients.NextID()
 
-	app.clients.add(clientID, conn)
+	app.clients.Add(clientID, conn)
 	app.logger.InfoContext(ctx, "got a connection:",
 		slog.Any("client_id", clientID),
 		slog.Any("remote_addr", conn.RemoteAddr().String()))
 
 	defer func() {
 		closeErr := conn.Close()
-		app.clients.remove(clientID)
+		app.clients.Remove(clientID)
 		app.broadcastServerMessageClientLeft(clientID)
 		app.broadcastQueueStatusToClientsWaiting()
 		if closeErr != nil {
@@ -337,7 +206,8 @@ func (app *app) handleConnection(ctx context.Context, conn net.Conn) {
 			return
 		default:
 			if deadlineErr := conn.SetDeadline(time.Now().Add(time.Second * 1)); deadlineErr != nil {
-				app.logger.ErrorContext(ctx, "error setting read deadline", slog.Any("error", err))
+				app.logger.ErrorContext(ctx, "error setting read deadline", slog.Any("error", deadlineErr))
+				return
 			}
 			var message string
 
@@ -401,15 +271,15 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 	app := &app{
 		logger: logger,
-		clients: &clients{
-			clients:             make(map[int64]net.Conn),
-			maxConnectedClients: *maxConnectedClients,
-			waitingQueueIDs:     make([]int64, 0, *maxConnectedClients),
+		clients: &client.Clients{
+			Clients:             make(map[int64]net.Conn),
+			MaxConnectedClients: *maxConnectedClients,
+			WaitingQueueIDs:     make([]int64, 0, *maxConnectedClients),
 		},
-		guessWordGameEngine: &guessWordGameEngine{
-			word:    "",
-			tries:   0,
-			started: false,
+		guessWordGameEngine: &game.GuessWordGameEngine{
+			Word:    "",
+			Tries:   0,
+			Started: false,
 		},
 	}
 
@@ -468,7 +338,7 @@ AcceptLoop:
 
 // handleMessage handles the message send to the server accordingly.
 func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int64) {
-	idxInsideWaitingQueue := app.clients.indexClientInWaitingQueue(clientID)
+	idxInsideWaitingQueue := app.clients.IndexClientInWaitingQueue(clientID)
 
 	switch {
 	case len(message) == 0 || len(message) > maxLenMsg:
@@ -481,7 +351,7 @@ func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int6
 	case idxInsideWaitingQueue != -1:
 		return
 	case message == commandCountClients:
-		count := fmt.Sprintf("[server] %d\n\n", app.clients.count())
+		count := fmt.Sprintf("[server] %d\n\n", app.clients.Count())
 		if _, err := rw.WriteString(count); err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
 			return
@@ -492,7 +362,7 @@ func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int6
 			return
 		}
 	case message == commandGame:
-		if !app.guessWordGameEngine.started {
+		if !app.guessWordGameEngine.Started {
 			err := startNewGuessWordGame(app, rw)
 			if err != nil {
 				app.logger.Error("Error while trying to initialize the guess word game", slog.Any("error", err))
@@ -509,12 +379,12 @@ func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int6
 		}
 
 	case message == commandEndGame:
-		if app.guessWordGameEngine.endGame() {
+		if app.guessWordGameEngine.EndGame() {
 			app.broadcastGameEnded()
 		}
 
 	case message[0] == '/':
-		msg := fmt.Sprintf("[server] %v '%v'\n\n", commandUnknowError, message)
+		msg := fmt.Sprintf("[server] unknown command '%v'\n\n", message)
 		_, err := rw.WriteString(msg)
 		if err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
@@ -522,7 +392,7 @@ func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int6
 		}
 
 	default:
-		if !app.guessWordGameEngine.started {
+		if !app.guessWordGameEngine.Started {
 			app.broadcastMessage(message, clientID)
 			return
 		}
@@ -537,16 +407,16 @@ func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int6
 
 // handleGuessWordGame handles the logic of the guess word game.
 func handleGuessWordGame(app *app, message string, rw *bufio.ReadWriter, clientID int64) error {
-	wordFound := app.guessWordGameEngine.checkWord(message)
+	wordFound := app.guessWordGameEngine.CheckWord(message)
 	if wordFound {
-		msg := fmt.Sprintf("Congratulations! You guessed the word '%s' correctly.\n", app.guessWordGameEngine.word)
+		msg := fmt.Sprintf("Congratulations! You guessed the word '%s' correctly.\n", app.guessWordGameEngine.Word)
 		if _, err := rw.WriteString(msg); err != nil {
 			return err
 		}
 
-		app.guessWordGameEngine.endGame()
+		app.guessWordGameEngine.EndGame()
 
-		msg = fmt.Sprintf("Client #%d guessed the word '%s' correctly!", clientID, app.guessWordGameEngine.word)
+		msg = fmt.Sprintf("Client #%d guessed the word '%s' correctly!", clientID, app.guessWordGameEngine.Word)
 		app.broadcastMessage(msg, clientID)
 	} else {
 		msg := fmt.Sprintf("Wrong guess: %v!\n", message)
@@ -568,14 +438,15 @@ func startNewGuessWordGame(app *app, rw *bufio.ReadWriter) error {
 		return err
 	}
 
-	app.guessWordGameEngine = app.guessWordGameEngine.newGame(word)
+	app.logger.Info("word chosen", slog.String("word", word))
+	app.guessWordGameEngine = app.guessWordGameEngine.NewGame(word)
 	return nil
 }
 
 // showWelcomeMsg returns the welcome message.
 func showWelcomeMsg(app *app, clientID int64) string {
 	var welcomeMsg string
-	idxInsideWaitingQueue := app.clients.indexClientInWaitingQueue(clientID)
+	idxInsideWaitingQueue := app.clients.IndexClientInWaitingQueue(clientID)
 
 	if idxInsideWaitingQueue != -1 {
 		welcomeMsg = fmt.Sprintf(
@@ -591,7 +462,7 @@ func showWelcomeMsg(app *app, clientID int64) string {
 				"Have fun!\n\n"+
 				showSpecialCommands(),
 			clientID,
-			app.clients.count())
+			app.clients.Count())
 	}
 
 	return welcomeMsg

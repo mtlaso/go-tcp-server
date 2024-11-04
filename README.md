@@ -17,6 +17,6 @@ REQUIREMENTS
     - [x] utiliser un param (--max-concurrent-clients-at-a-time)
 - [x] max num of char (200 ?)
 - [x] ajouter un/des jeux ?? (guess small word?)
-- [ ] flag.StringVar(&listenAddr, "listen-addr", "localhost:8080", "server listen address")
+- [x] flag.StringVar(&listenAddr, "listen-addr", "localhost:8080", "server listen address")
 - [ ] ajouter des tests ?
 - [x] enlever \n\n 2 fois en envoyant messages
