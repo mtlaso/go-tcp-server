@@ -1,4 +1,4 @@
-<preview-gif>
+[![asciicast](https://asciinema.org/a/687200.svg)](https://asciinema.org/a/687200)
 
 [*english*](#En)
 
