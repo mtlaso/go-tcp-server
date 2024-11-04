@@ -55,10 +55,10 @@ func (ge *guessWordGameEngine) newGame(word string) *guessWordGameEngine {
 // checkWord checks if the word was found.
 // If found, it returns true and ends the game.
 func (ge *guessWordGameEngine) checkWord(word string) bool {
-	ge.mu.RLock()
+	ge.mu.Lock()
 	defer func() {
 		ge.tries++
-		ge.mu.RUnlock()
+		ge.mu.Unlock()
 	}()
 
 	if !ge.started {
@@ -190,10 +190,8 @@ func (app *app) broadcastMessage(message string, clientID int64) {
 	for _, client := range otherClients {
 		// clientID here is the client_id of the client who sent the message!
 		msg := fmt.Sprintf("[%v][client #%v] %v\n", client.RemoteAddr().String(), clientID, message)
-		_, err := client.Write([]byte(msg))
-		if err != nil {
+		if _, err := client.Write([]byte(msg)); err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
-			return
 		}
 	}
 }
@@ -216,10 +214,8 @@ func (app *app) broadcastServerMessageClientLeft(clientID int64) {
 	for _, client := range otherClients {
 		// clientID here is the client_id of the client who sent the message!
 		msg := fmt.Sprintf("[server] client #%v left the server.\n\n", clientID)
-		_, err := client.Write([]byte(msg))
-		if err != nil {
+		if _, err := client.Write([]byte(msg)); err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
-			return
 		}
 	}
 }
@@ -236,16 +232,16 @@ func (app *app) broadcastGameStarted() {
 	}
 	app.clients.mu.RUnlock()
 
+	app.guessWordGameEngine.mu.RLock()
+	defer app.guessWordGameEngine.mu.RUnlock()
 	for _, client := range clientsThatWillPlay {
 		msg := fmt.Sprintf("Guess a word game started! Try to guess to word\n"+
 			"The word has %d letters.\n"+
 			"The word starts with: %v\n\n",
 			len(app.guessWordGameEngine.word),
 			string(app.guessWordGameEngine.word[0]))
-		_, err := client.Write([]byte(msg))
-		if err != nil {
+		if _, err := client.Write([]byte(msg)); err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
-			return
 		}
 	}
 }
@@ -266,10 +262,8 @@ func (app *app) broadcastGameEnded() {
 		msg := fmt.Sprintf("Guess a word game ended! The word was : %v\n"+
 			"Have a good day!\n\n",
 			app.guessWordGameEngine.word)
-		_, err := client.Write([]byte(msg))
-		if err != nil {
+		if _, err := client.Write([]byte(msg)); err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
-			return
 		}
 	}
 }
@@ -290,10 +284,8 @@ func (app *app) broadcastQueueStatusToClientsWaiting() {
 
 	for k, client := range clientsInWaitingQueue {
 		msg := fmt.Sprintf("You are in the position %d in the queue.\n\n", k+1)
-		_, err := client.Write([]byte(msg))
-		if err != nil {
+		if _, err := client.Write([]byte(msg)); err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
-			return
 		}
 	}
 }
@@ -319,7 +311,6 @@ func (app *app) handleConnection(conn net.Conn) {
 
 	rw := bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
 
-	// Welcome message.
 	_, err := rw.WriteString(showWelcomeMsg(app, clientID))
 	if err != nil {
 		app.logger.Error("error writing to client", slog.Any("error", err))
@@ -336,7 +327,6 @@ func (app *app) handleConnection(conn net.Conn) {
 	for {
 		var message string
 
-		// Read until newline or EOF.
 		message, err = rw.ReadString('\n')
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -421,19 +411,22 @@ func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int6
 
 	switch {
 	case len(message) == 0 || len(message) > maxLenMsg:
+		msg := fmt.Sprintf("[server] Message length must be between 1 and %d characters.\n", maxLenMsg)
+		if _, err := rw.WriteString(msg); err != nil {
+			app.logger.Error("error writing to client", slog.Any("error", err))
+			return
+		}
 		return
 	case idxInsideWaitingQueue != -1:
 		return
 	case message == commandCountClients:
 		count := fmt.Sprintf("[server] %d\n\n", app.clients.count())
-		_, err := rw.WriteString(count)
-		if err != nil {
+		if _, err := rw.WriteString(count); err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
 			return
 		}
 	case message == commandSpecialCommands:
-		_, err := rw.WriteString(showSpecialCommands())
-		if err != nil {
+		if _, err := rw.WriteString(showSpecialCommands()); err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
 			return
 		}

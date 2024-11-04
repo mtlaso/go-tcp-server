@@ -16,8 +16,7 @@ REQUIREMENTS
     - [x] afficher un message si plus de 5 conn, mettre dans un pool (queue ?)
     - [x] utiliser un param (--max-concurrent-clients-at-a-time)
 - [x] max num of char (200 ?)
-- [ ] traductions des messages du serveur avec commande
-- [ ] traductions des messages des clients en temps réel (avec commande spéciale)
 - [x] ajouter un/des jeux ?? (guess small word?)
+- [ ] flag.StringVar(&listenAddr, "listen-addr", "localhost:8080", "server listen address")
 - [ ] ajouter des tests ?
 - [x] enlever \n\n 2 fois en envoyant messages
