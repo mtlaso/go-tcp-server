@@ -13,21 +13,64 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"example.com/tcp-clients/words"
 )
 
 const (
 	commandCountClients            = "/count"
 	commandCountClientsDesc        = "number of connected clients to the server"
-	commandSpecialCommands         = "/help"
+	commandSpecialCommands         = "/commands"
 	commandSpecialCommandsDesc     = "show special commands"
+	commandGame                    = "/game"
+	commandGameDesc                = "play guess a word with other users (english words)"
+	commandEndGame                 = "/endgame"
+	commandEndGameDesc             = "end game session"
 	commandUnknowError             = "unknown command"
 	maxLenMsg                      = 200
 	flagMaxConnectedClients        = "max-connected-clients"
 	flagMaxConnectedClientsDefault = 100
 	flagMaxConnectedClientsDesc    = "maximum of connected clients at the same time"
-	flagSaveLogs                   = "save-logs"
-	flagSaveLogsDesc               = "save logs to a file (ex : --save-logs path/to/file.txt)"
 )
+
+// guessWordGameEngine represents the game data when playing the guess word game.
+type guessWordGameEngine struct {
+	word    string
+	mu      sync.RWMutex
+	tries   int
+	started bool
+}
+
+// newGame initialises a new game engine.
+func (ge *guessWordGameEngine) newGame(word string) *guessWordGameEngine {
+	ge.mu.Lock()
+	defer ge.mu.Unlock()
+	return &guessWordGameEngine{
+		word:    word,
+		tries:   0,
+		started: true,
+	}
+}
+
+// checkWord checks if the word was found.
+// If found, it returns true and ends the game.
+func (ge *guessWordGameEngine) checkWord(word string) bool {
+	ge.mu.RLock()
+	defer func() {
+		ge.tries++
+		ge.mu.RUnlock()
+	}()
+
+	if !ge.started {
+		return false
+	}
+	if word == ge.word {
+		ge.started = false
+		return true
+	}
+
+	return false
+}
 
 // clients represents the clients connected to the server.
 type clients struct {
@@ -110,8 +153,9 @@ func (c *clients) nextID() int64 {
 // app is an instance grouping functionalities of the app.
 // Used for dependency injection.
 type app struct {
-	logger  *slog.Logger
-	clients *clients
+	logger              *slog.Logger
+	clients             *clients
+	guessWordGameEngine *guessWordGameEngine
 }
 
 // broadcastMessage broadcasts a message to all other clients except the one who sent the broadcastMessage
@@ -158,6 +202,32 @@ func (app *app) broadcastServerMessageClientLeft(clientID int64) {
 	for _, client := range otherClients {
 		// clientID here is the client_id of the client who sent the message!
 		msg := fmt.Sprintf("[server] client #%v left the server.\n\n", clientID)
+		_, err := client.Write([]byte(msg))
+		if err != nil {
+			app.logger.Error("error writing to client", slog.Any("error", err))
+			return
+		}
+	}
+}
+
+// broadcastGameStarted broadcasts that a game started to the chatting clients.
+func (app *app) broadcastGameStarted() {
+	clientsThatWillPlay := make(map[int64]net.Conn)
+
+	app.clients.mu.RLock()
+	for k, v := range app.clients.clients {
+		if !slices.Contains(app.clients.waitingQueueIDs, k) {
+			clientsThatWillPlay[k] = v
+		}
+	}
+	app.clients.mu.RUnlock()
+
+	for _, client := range clientsThatWillPlay {
+		msg := fmt.Sprintf("Guess a word game started! Try to guess to word\n"+
+			"The word has %d letters.\n"+
+			"The word starts with: %v\n\n",
+			len(app.guessWordGameEngine.word),
+			string(app.guessWordGameEngine.word[0]))
 		_, err := client.Write([]byte(msg))
 		if err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
@@ -265,6 +335,7 @@ func main() {
 		flagMaxConnectedClients,
 		flagMaxConnectedClientsDefault,
 		flagMaxConnectedClientsDesc)
+
 	flag.Parse()
 
 	if *maxConnectedClients <= 1 {
@@ -278,6 +349,11 @@ func main() {
 			clients:             make(map[int64]net.Conn),
 			maxConnectedClients: *maxConnectedClients,
 			waitingQueueIDs:     make([]int64, 0, *maxConnectedClients),
+		},
+		guessWordGameEngine: &guessWordGameEngine{
+			word:    "",
+			tries:   0,
+			started: false,
 		},
 	}
 
@@ -301,29 +377,47 @@ func main() {
 	}
 }
 
-func handleMessage(msg string, app *app, rw *bufio.ReadWriter, clientID int64) {
+// handleMessage handles the message send to the server accordingly.
+func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int64) {
 	idxInsideWaitingQueue := app.clients.indexClientInWaitingQueue(clientID)
 
 	switch {
-	case len(msg) == 0 || len(msg) > maxLenMsg:
+	case len(message) == 0 || len(message) > maxLenMsg:
 		return
 	case idxInsideWaitingQueue != -1:
 		return
-	case msg == commandCountClients:
+	case message == commandCountClients:
 		count := fmt.Sprintf("[server] %d\n\n", app.clients.count())
 		_, err := rw.WriteString(count)
 		if err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
 			return
 		}
-	case msg == commandSpecialCommands:
+	case message == commandSpecialCommands:
 		_, err := rw.WriteString(showSpecialCommands())
 		if err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
 			return
 		}
-	case msg[0] == '/':
-		msg := fmt.Sprintf("[server] %v '%v'\n\n", commandUnknowError, msg)
+	case message == commandGame:
+		if !app.guessWordGameEngine.started {
+			err := startNewGuessWordGame(app, rw)
+			if err != nil {
+				app.logger.Error("Error while trying to initialize the guess word game", slog.Any("error", err))
+				return
+			}
+
+			app.broadcastGameStarted()
+		} else {
+			_, err := rw.WriteString("A game already started!\n\n")
+			if err != nil {
+				app.logger.Error("error writing to client", slog.Any("error", err))
+				return
+			}
+		}
+
+	case message[0] == '/':
+		msg := fmt.Sprintf("[server] %v '%v'\n\n", commandUnknowError, message)
 		_, err := rw.WriteString(msg)
 		if err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
@@ -331,8 +425,52 @@ func handleMessage(msg string, app *app, rw *bufio.ReadWriter, clientID int64) {
 		}
 
 	default:
-		app.broadcastMessage(msg, clientID)
+		if !app.guessWordGameEngine.started {
+			app.broadcastMessage(message, clientID)
+			return
+		}
+
+		err := handleGuessWordGame(app, message, rw, clientID)
+		if err != nil {
+			app.logger.Error("Error handling the guess a word game", slog.Any("error", err))
+			return
+		}
 	}
+}
+
+// handleGuessWordGame handles the logic of the guess word game.
+func handleGuessWordGame(app *app, message string, rw *bufio.ReadWriter, clientID int64) error {
+	wordFound := app.guessWordGameEngine.checkWord(message)
+	if wordFound {
+		msg := fmt.Sprintf("Congratulations! You guessed the word '%s' correctly.\n", app.guessWordGameEngine.word)
+		if _, err := rw.WriteString(msg); err != nil {
+			return err
+		}
+
+		msg = fmt.Sprintf("Client #%d guessed the word '%s' correctly!", clientID, app.guessWordGameEngine.word)
+		app.broadcastMessage(msg, clientID)
+	} else {
+		msg := fmt.Sprintf("Wrong guess: %v!\n", message)
+		if _, err := rw.WriteString(msg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// startNewGuessWordGame initializes and starts a new guess word game.
+func startNewGuessWordGame(app *app, rw *bufio.ReadWriter) error {
+	word, err := words.GenerateWord()
+	if err != nil {
+		if _, writeErr := rw.WriteString("An error happend, please try again."); writeErr != nil {
+			return writeErr
+		}
+
+		return err
+	}
+
+	app.guessWordGameEngine = app.guessWordGameEngine.newGame(word)
+	return nil
 }
 
 // showWelcomeMsg returns the welcome message.
@@ -364,12 +502,16 @@ func showWelcomeMsg(app *app, clientID int64) string {
 func showSpecialCommands() string {
 	commandsMsg := fmt.Sprintf(
 		"Special commands:\n"+
+			"\t%v \t\t %v\n"+
 			"\t%v \t %v\n"+
+			"\t%v \t\t %v\n"+
 			"\t%v \t %v\n\n",
 		commandCountClients,
 		commandCountClientsDesc,
 		commandSpecialCommands,
-		commandSpecialCommandsDesc)
+		commandSpecialCommandsDesc,
+		commandGame, commandGameDesc,
+		commandEndGame, commandEndGameDesc)
 
 	return commandsMsg
 }

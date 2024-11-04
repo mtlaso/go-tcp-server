@@ -1,0 +1,26 @@
+flag logs 
+time=2024-11-03T01:56:04.016-05:00 level=INFO msg="tcp server listening for connections..."
+time=2024-11-03T01:56:11.535-05:00 level=INFO msg="got a connection:" client_id=1 remote_addr=127.0.0.1:54814
+time=2024-11-03T01:56:13.376-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:54814 client_id=1 message=yo
+time=2024-11-03T01:56:15.200-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:54814 client_id=1 message=/count
+time=2024-11-03T01:56:16.013-05:00 level=INFO msg="client disconnected" client_id=1 remote_addr=127.0.0.1:54814
+time=2024-11-03T01:59:36.333-05:00 level=INFO msg="tcp server listening for connections..."
+time=2024-11-03T01:59:54.014-05:00 level=INFO msg="got a connection:" client_id=1 remote_addr=127.0.0.1:43592
+time=2024-11-03T01:59:58.084-05:00 level=INFO msg="got a connection:" client_id=2 remote_addr=127.0.0.1:43598
+time=2024-11-03T02:00:00.640-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:43592 client_id=1 message="hello man"
+time=2024-11-03T02:00:02.256-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:43598 client_id=2 message=wassu[
+time=2024-11-03T02:00:04.229-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:43598 client_id=2 message="fuck you"
+time=2024-11-03T02:00:05.800-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:43598 client_id=2 message=bitch
+time=2024-11-03T02:00:06.775-05:00 level=INFO msg="client disconnected" client_id=2 remote_addr=127.0.0.1:43598
+time=2024-11-03T02:00:09.087-05:00 level=INFO msg="client disconnected" client_id=1 remote_addr=127.0.0.1:43592
+time=2024-11-03T02:00:30.976-05:00 level=INFO msg="tcp server listening for connections..."
+time=2024-11-03T02:00:46.290-05:00 level=INFO msg="got a connection:" client_id=1 remote_addr=127.0.0.1:60478
+time=2024-11-03T02:00:49.493-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:60478 client_id=1 message=/count
+time=2024-11-03T02:00:50.922-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:60478 client_id=1 message=no
+time=2024-11-03T02:00:51.790-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:60478 client_id=1 message=np
+time=2024-11-03T02:00:52.877-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:60478 client_id=1 message=:(
+time=2024-11-03T02:00:53.841-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:60478 client_id=1 message=test
+time=2024-11-03T02:00:55.193-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:60478 client_id=1 message=hehe
+time=2024-11-03T02:00:56.970-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:60478 client_id=1 message=sdadd
+time=2024-11-03T02:01:06.383-05:00 level=INFO msg="received message" remote_addr=127.0.0.1:60478 client_id=1 message="sad internet boys"
+time=2024-11-03T02:01:07.587-05:00 level=INFO msg="client disconnected" client_id=1 remote_addr=127.0.0.1:60478
