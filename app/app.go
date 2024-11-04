@@ -20,21 +20,15 @@ import (
 )
 
 const (
-	commandCountClients            = "/count"
-	commandCountClientsDesc        = "number of connected clients to the server"
-	commandSpecialCommands         = "/commands"
-	commandSpecialCommandsDesc     = "show special commands"
-	commandGame                    = "/game"
-	commandGameDesc                = "play guess a word with other users (english words)"
-	commandEndGame                 = "/endgame"
-	commandEndGameDesc             = "end game session"
-	maxLenMsg                      = 200
-	flagMaxConnectedClients        = "max-connected-clients"
-	flagMaxConnectedClientsDefault = 100
-	flagMaxConnectedClientsDesc    = "maximum of connected clients at the same time"
-	flagListenAddr                 = "listen-addr"
-	flagListenAddrDefault          = "localhost:8080"
-	flagListenAddrDesc             = "server listen address (ex : listen-addr=localhost:8080)"
+	commandCountClients        = "/count"
+	commandCountClientsDesc    = "number of connected clients to the server"
+	commandSpecialCommands     = "/commands"
+	commandSpecialCommandsDesc = "show special commands"
+	commandGame                = "/game"
+	commandGameDesc            = "play guess a word with other users (english words)"
+	commandEndGame             = "/endgame"
+	commandEndGameDesc         = "end game session"
+	maxLenMsg                  = 200
 )
 
 // App is an instance grouping functionalities of the App.
@@ -45,6 +39,7 @@ type App struct {
 	GuessWordGameEngine *guessword.GameEngine
 }
 
+// NewServer returns a new server with all fields initialized.
 func NewServer(logger *slog.Logger, maxConnectedClients *int) *App {
 	return &App{
 		Logger: logger,

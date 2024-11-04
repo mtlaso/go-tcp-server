@@ -24,15 +24,6 @@ import (
 )
 
 const (
-	commandCountClients            = "/count"
-	commandCountClientsDesc        = "number of connected clients to the server"
-	commandSpecialCommands         = "/commands"
-	commandSpecialCommandsDesc     = "show special commands"
-	commandGame                    = "/game"
-	commandGameDesc                = "play guess a word with other users (english words)"
-	commandEndGame                 = "/endgame"
-	commandEndGameDesc             = "end game session"
-	maxLenMsg                      = 200
 	flagMaxConnectedClients        = "max-connected-clients"
 	flagMaxConnectedClientsDefault = 100
 	flagMaxConnectedClientsDesc    = "maximum of connected clients at the same time"
@@ -63,6 +54,7 @@ func main() {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
 	app := app.NewServer(logger, maxConnectedClients)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -71,7 +63,7 @@ func main() {
 	sigsChan := make(chan os.Signal, 1)
 	signal.Notify(sigsChan, syscall.SIGINT, syscall.SIGTERM, os.Interrupt)
 
-	ln, err := net.Listen("tcp", "localhost:8080")
+	ln, err := net.Listen("tcp", *listenAddr)
 	if err != nil {
 		app.Logger.Error("failed to listen", slog.Any("error", err))
 		panic(err)
