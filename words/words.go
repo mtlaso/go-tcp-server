@@ -12,7 +12,6 @@ var f embed.FS
 
 // GenerateWord returns a random word.
 func GenerateWord() (string, error) {
-
 	data, err := f.ReadFile("words.txt")
 	if err != nil {
 		return "", err

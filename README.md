@@ -18,6 +18,6 @@ REQUIREMENTS
 - [x] max num of char (200 ?)
 - [ ] traductions des messages du serveur avec commande
 - [ ] traductions des messages des clients en temps réel (avec commande spéciale)
-- [ ] ajouter un/des jeux ?? (guess small word?)
+- [x] ajouter un/des jeux ?? (guess small word?)
 - [ ] ajouter des tests ?
 - [x] enlever \n\n 2 fois en envoyant messages

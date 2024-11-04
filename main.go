@@ -72,6 +72,20 @@ func (ge *guessWordGameEngine) checkWord(word string) bool {
 	return false
 }
 
+// endGame end a game that started.
+//
+// Return true if the game just ended.
+func (ge *guessWordGameEngine) endGame() bool {
+	ge.mu.Lock()
+	defer ge.mu.Unlock()
+	if ge.started {
+		ge.started = false
+		return true
+	}
+
+	return false
+}
+
 // clients represents the clients connected to the server.
 type clients struct {
 	clients             map[int64]net.Conn
@@ -210,7 +224,7 @@ func (app *app) broadcastServerMessageClientLeft(clientID int64) {
 	}
 }
 
-// broadcastGameStarted broadcasts that a game started to the chatting clients.
+// broadcastGameStarted broadcasts that a game started.
 func (app *app) broadcastGameStarted() {
 	clientsThatWillPlay := make(map[int64]net.Conn)
 
@@ -228,6 +242,30 @@ func (app *app) broadcastGameStarted() {
 			"The word starts with: %v\n\n",
 			len(app.guessWordGameEngine.word),
 			string(app.guessWordGameEngine.word[0]))
+		_, err := client.Write([]byte(msg))
+		if err != nil {
+			app.logger.Error("error writing to client", slog.Any("error", err))
+			return
+		}
+	}
+}
+
+// broadcastGameEnded broadcasts that the game ended.
+func (app *app) broadcastGameEnded() {
+	clientsThatWillPlay := make(map[int64]net.Conn)
+
+	app.clients.mu.RLock()
+	for k, v := range app.clients.clients {
+		if !slices.Contains(app.clients.waitingQueueIDs, k) {
+			clientsThatWillPlay[k] = v
+		}
+	}
+	app.clients.mu.RUnlock()
+
+	for _, client := range clientsThatWillPlay {
+		msg := fmt.Sprintf("Guess a word game ended! The word was : %v\n"+
+			"Have a good day!\n\n",
+			app.guessWordGameEngine.word)
 		_, err := client.Write([]byte(msg))
 		if err != nil {
 			app.logger.Error("error writing to client", slog.Any("error", err))
@@ -416,6 +454,11 @@ func handleMessage(message string, app *app, rw *bufio.ReadWriter, clientID int6
 			}
 		}
 
+	case message == commandEndGame:
+		if app.guessWordGameEngine.endGame() {
+			app.broadcastGameEnded()
+		}
+
 	case message[0] == '/':
 		msg := fmt.Sprintf("[server] %v '%v'\n\n", commandUnknowError, message)
 		_, err := rw.WriteString(msg)
@@ -446,6 +489,8 @@ func handleGuessWordGame(app *app, message string, rw *bufio.ReadWriter, clientI
 		if _, err := rw.WriteString(msg); err != nil {
 			return err
 		}
+
+		app.guessWordGameEngine.endGame()
 
 		msg = fmt.Sprintf("Client #%d guessed the word '%s' correctly!", clientID, app.guessWordGameEngine.word)
 		app.broadcastMessage(msg, clientID)
