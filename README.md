@@ -68,7 +68,7 @@ tail -f mylogs.log  # Voir les journaux en temps réel
 | `/endgame` | Terminer la partie en cours |
 
 ## 🛠️ Stack
-- Go 1.21
+- Go
 - Packages de la bibliothèque standard (net, context, sync)
 
 # En
@@ -144,5 +144,5 @@ tail -f mylogs.log  # View logs in real-time
 | `/endgame` | End current game session |
 
 ## 🛠️ Tech Stack
-- Go 1.21
+- Go
 - Standard library packages (net, context, sync)

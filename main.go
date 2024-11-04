@@ -20,7 +20,7 @@ import (
 	"sync"
 	"syscall"
 
-	"example.com/tcp-clients/app"
+	"github.com/mtlaso/go-tcp-server/app"
 )
 
 const (

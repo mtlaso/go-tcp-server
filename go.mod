@@ -1,3 +1,3 @@
-module example.com/tcp-clients
+module github.com/mtlaso/go-tcp-server
 
 go 1.23.2

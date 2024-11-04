@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"example.com/tcp-clients/client"
-	"example.com/tcp-clients/guessword"
-	"example.com/tcp-clients/words"
+	"github.com/mtlaso/go-tcp-server/client"
+	"github.com/mtlaso/go-tcp-server/guessword"
+	"github.com/mtlaso/go-tcp-server/words"
 )
 
 const (
